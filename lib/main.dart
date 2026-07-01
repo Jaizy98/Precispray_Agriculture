@@ -398,41 +398,55 @@ class AnimationScreen extends StatefulWidget {
 class _AnimationScreenState extends State<AnimationScreen> {
   late VideoPlayerController _controller;
   bool _navigated = false;
+  Timer? _fallbackTimer;
 
   @override
   void initState() {
     super.initState();
+
+    // Hard fallback: if the video never initializes, bail after 5 s.
+    _fallbackTimer = Timer(const Duration(seconds: 5), _navigateToDashboard);
+
     _controller = VideoPlayerController.asset('assets/animation.mp4');
     _controller.initialize().then((_) {
       if (!mounted) return;
       setState(() {});
       _controller.play();
+
+      // Now we know the exact duration — reset the fallback to
+      // (actual duration + 1 s buffer) so it only fires if the video stalls.
+      _fallbackTimer?.cancel();
+      final videoDuration = _controller.value.duration;
+      _fallbackTimer = Timer(videoDuration + const Duration(seconds: 1), _navigateToDashboard);
     }).catchError((error) {
       debugPrint('Video failed to initialize: $error');
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const DashboardScreen()),
-        );
-      }
+      _navigateToDashboard();
     });
     _controller.addListener(_checkVideoEnd);
+  }
+
+  void _navigateToDashboard() {
+    if (_navigated) return;
+    _navigated = true;
+    _fallbackTimer?.cancel();
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const DashboardScreen()),
+    );
   }
 
   void _checkVideoEnd() {
     if (_navigated) return;
     final value = _controller.value;
     if (value.isInitialized && value.position >= value.duration && !value.isPlaying) {
-      _navigated = true;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const DashboardScreen()),
-      );
+      _navigateToDashboard();
     }
   }
 
   @override
   void dispose() {
+    _fallbackTimer?.cancel();
     _controller.removeListener(_checkVideoEnd);
     _controller.dispose();
     super.dispose();
